@@ -1,0 +1,161 @@
+package com.ericsson.eniq.flssymlink.fls;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.stream.Collectors;
+
+
+/**
+ * @author xramear	
+ *
+ */
+/**
+ * @author xramear
+ *
+ */
+class NodeTypeDataTypeCache {
+	
+	private static Map<String,List<String>> nodeDataTypeCache = new HashMap<>();
+	private static final String CONFIG_DIR = "/eniq/sw/installer/";
+	private static final String NODETYPEDATATYPEMAPPINGFILE="NodeTypeDataTypeMapping.properties";
+	private static final String FIFTEEN_MIN = "15MIN";
+	private static final String EVENTS = "Events";
+		
+	private NodeTypeDataTypeCache(){
+		
+	}
+	
+	static void init(Logger log) throws IOException {
+		initNodeTypeDataTypeCache(log);
+	}
+	
+	public static Map<String, List<String>> getNodeDataTypeCache() {
+		return deepCopyOfCache();
+	}
+	
+	private static Map<String, List<String>> deepCopyOfCache() {
+		Map<String, List<String>> result = new HashMap<>();
+		nodeDataTypeCache.forEach((key,value) -> {
+			List<String> list = new ArrayList<>();
+			list.addAll(value);
+			result.put(key, value);});
+		
+		return result;
+	}
+		
+	private static void initNodeTypeDataTypeCache(Logger log) throws IOException	{
+		nodeDataTypeCache.clear();
+		File nodeDataTypeMapping = new File(CONFIG_DIR + NODETYPEDATATYPEMAPPINGFILE);
+		String line;
+		String nodeTypeFromFile;
+		String dataTypeAndTechnologyFromFile;
+		try (BufferedReader br = new BufferedReader(new FileReader(nodeDataTypeMapping))) {
+			while ((line = br.readLine()) != null) {
+				if (line.contains(":")) {
+					String[] nodeAndDataTypeFromFile = line.split(":", 2);
+					nodeTypeFromFile = nodeAndDataTypeFromFile[0];
+					dataTypeAndTechnologyFromFile = nodeAndDataTypeFromFile[1];
+					addToCache(nodeTypeFromFile, dataTypeAndTechnologyFromFile);
+				}
+			}
+			log.info("NodeTypeDataType Cache has been initialised: " + nodeDataTypeCache);
+		} 
+	}
+	
+	private static void addToCache(String nodeType, String dataTypeAndTechnology) {
+		List<String> dataTypeListMap = nodeDataTypeCache.get(nodeType);
+		if (dataTypeListMap == null) {
+			dataTypeListMap = new ArrayList<>();
+		}
+		dataTypeListMap.add(dataTypeAndTechnology);
+		nodeDataTypeCache.put(nodeType, dataTypeListMap);
+	}
+	
+	private static void extractForNonEventTypes(String granularities, String technology,
+			String dataType, List<String> pmDataTypeList) {
+		if (granularities.contains(":")) {
+			List<String> granularityList = Arrays.asList(granularities.split("_"));
+			for (String granularityForNode : granularityList) {
+				if (granularityForNode.contains(technology)) {
+					String granularityNodeType = granularityForNode.split(":")[1];
+					pmDataTypeList.add(getDataTypeFromGranularity(granularityNodeType, dataType));
+				}
+			}
+		} else {
+			pmDataTypeList.add(getDataTypeFromGranularity(granularities, dataType));
+		}
+	}
+	
+	private static String getDataTypeFromGranularity(String granularity, String dataType) {
+		if (!FIFTEEN_MIN.equals(granularity)) {
+			return dataType + "_" + granularity;
+		} else {
+			return dataType;
+		}
+	}
+	
+	private static void extractDataType(String granularity, String technology,
+			String dataType, List<String> pmDataTypeList){
+		if (EVENTS.equals(technology)) {
+			pmDataTypeList.add(dataType);
+		}else {
+			extractForNonEventTypes(granularity, technology, dataType, pmDataTypeList);
+		}
+		
+	}
+	
+	public static List<String> getPMDataTypeListWithGranularity(String nodeType,String granularity, Logger log) {
+		try {
+			if (nodeDataTypeCache.isEmpty()) {
+				log.warning("NodeTypeDataType Map is empty");
+				return new ArrayList<>();
+			}
+			List<String> pmDataTypeList = new ArrayList<>();
+			String[] dtArray;
+			String dataType;
+			for (String dataTypeAndTechnology : nodeDataTypeCache.get(nodeType)) {
+				dtArray = dataTypeAndTechnology.split(":");
+				dataType = dtArray[0];
+				String technologyData = dtArray[1];
+				for (String technology : Arrays.asList(technologyData.split(","))) {
+					extractDataType(granularity, technology, dataType, pmDataTypeList);
+				}
+			}
+			return pmDataTypeList;
+		} catch (Exception e) {
+			log.log(Level.WARNING, "Failed to get the data type for node type " + nodeType + " from the file", e);
+			return new ArrayList<>();
+		}
+	}
+	
+	
+	public static List<String> getDataTypeForNodeType(String nodeType, Logger log)
+	{
+		try {
+			if (nodeDataTypeCache.isEmpty()) {
+				log.warning("NodeTypeDataType Map is empty");
+				return new ArrayList<>();
+			}
+			return nodeDataTypeCache.get(nodeType).stream().map(NodeTypeDataTypeCache::getDataType)
+					.collect(Collectors.toList());
+		} catch (Exception e) {
+			log.log(Level.WARNING, "Failed to get the data type for node type " + nodeType + " from the file", e);
+			return new ArrayList<>();
+		}
+	}
+	
+	private static String getDataType(String dataTypeAndTechnology) {
+		return dataTypeAndTechnology.split(":")[0];
+	}
+	
+				
+
+}
